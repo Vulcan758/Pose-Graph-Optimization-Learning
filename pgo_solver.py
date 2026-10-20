@@ -1,16 +1,17 @@
 from Lee import SE3, se3
 import numpy as np
-from scipy.linalg import cho_factor, cho_solve
+# from scipy.linalg import cho_factor, cho_solve
 import scipy.sparse as sp
-from scipy.sparse.linalg import spsolve
+# from scipy.sparse.linalg import spsolve
+from sksparse.cholmod import cholesky
 
 #todo
 #make general for se2 as well (needs general base se2 class or separate se2 class)
 # in the Solver init make a check for SE2 SE3 in both gt and real dataset
-#make sparse H and solvable with spsolve or cholmod
+#make sparse H and solvable with spsolve or cholmod (done)
 #do some minor efficiency cleanups
 #add LM version of solver
-#implement base solver class that the GN or LM solver inherits?
+#implement base solver class that the GN or LM solver inherits (done for GN)
 
 class Solver():
     def __init__(self, g2o_dataset_filepath, g2o_gt_filepath=""):
@@ -73,6 +74,7 @@ class GNSolver(Solver): #Gauss-Newton Solver which will inherit from Solver base
         new_final_pose_list = self.pose_list.copy()
 
         prev_cost = None
+        factor = None
 
         for loop in range(loop_num):
             #main loop
@@ -128,9 +130,16 @@ class GNSolver(Solver): #Gauss-Newton Solver which will inherit from Solver base
 
             H = sp.coo_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(d * N, d * N)).tocsc()
             delx = np.zeros(d * N)
-            # delx[d:] = cho_solve((c, low), -b[d:])
-            delx[d:] = spsolve(H[d:, d:], -b[d:]) #anchor for gauge freedom
+            # # delx[d:] = cho_solve((c, low), -b[d:])
+            # delx[d:] = spsolve(H[d:, d:], -b[d:]) #anchor for gauge freedom
 
+            H_ff = H[d:, d:].tocsc() #anchor for gauge freedom
+            if factor is None:
+                factor = cholesky(H_ff)
+            else:
+                factor.cholesky_inplace(H_ff)
+
+            delx[d:] = factor(-b[d:])
 
             for n in range(N):
                 delta_x = delx[n * d : n * d + d]
