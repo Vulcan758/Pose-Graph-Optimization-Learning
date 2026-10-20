@@ -1,9 +1,6 @@
 import numpy as np
-# import matplotlib.pyplot as plt
-
 
 def to_hat(vector): #converts w to w^
-    # n = self.n 
     if vector.shape[0] == 3: #direct for low dim stuff
         x, y, z = vector
         return np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]])
@@ -36,8 +33,6 @@ def to_vee(hat_vec):
     
     return vector
 
-#only thing left here is the log map
-
 def is_square(matrix):
     r_, c_ = matrix.shape
     if r_ != c_:
@@ -47,15 +42,10 @@ def is_square(matrix):
 def is_valid_hat(hat_vec):
     is_square(hat_vec)
     n = hat_vec.shape[0]
-    # print(hat_vec + hat_vec.T)
-    # print(np.zeros((n, n)))
     return np.allclose(hat_vec + hat_vec.T, np.zeros((n, n))) #skew symmetric ma|trices summed with its transpose is supposed to equal 0
 
 class SO_n():
     def __init__(self, R: np.ndarray, verbose = False, validate=True):
-        # r, c = R.shape
-        # if r != c:
-        #     raise ValueError(f"Matrix is not n by n: {r} x {c}") #continue
         self.verbose = verbose
         is_square(R)
         r = R.shape[0]
@@ -105,8 +95,6 @@ class so_n():
         if phi.ndim != 1:
             raise ValueError("Invalid vector shape")
         self.hat = self.to_hat(phi)
-        # if not self.is_valid_hat(self.hat): # this line doesnt do much
-        #     raise ValueError("Invalid contents in vector")
         self.vee = phi #this is the vector
         if self.verbose:
             print(self.hat) #this is the skew
@@ -116,8 +104,6 @@ class so_n():
     def is_valid_hat(self, hat_vec):
         is_square(hat_vec)
         n = hat_vec.shape[0]
-        # print(hat_vec + hat_vec.T)
-        # print(np.zeros((n, n)))
         return np.allclose(hat_vec + hat_vec.T, np.zeros((n, n))) #skew symmetric matrices summed with its transpose is supposed to equal 0
 
     def compute_left_jacobians(self, right = False):
@@ -144,9 +130,6 @@ class so_n():
         return Jl, Jl_inv
 
     def exp_map(self):
-        # if not is_valid_hat(self.hat): #this does the is_square # not needed
-        #     raise ValueError("Invalid skew symmetric matrix input")
-        
         n = self.hat.shape[0]
         if self.theta < self.threshold:
             c_term, s_term = 0.5 - ((self.theta ** 2) / 24), 1 - ((self.theta ** 2) / 6)
@@ -168,33 +151,9 @@ class so_n():
 
     def to_hat(self, vector): #converts w to w^
         return to_hat(vector)
-        # n = self.n 
-        # m = vector.shape[0]
-        # n = int((1 + np.sqrt(1 + 8 * m)) / 2) # invert m = n(n-1)/2 --> this is the n value in n by n of matrix
-            
-        # if n * (n - 1) // 2 != m: # this expression outputs the vector shape required, (e.g. 3x3 --> 3, 4x4 --> 6, 5x5 --> 10, ..)
-        #     raise ValueError(f"length {m} is not n(n-1)/2 for any integer n")
-    
-        # r, c = np.triu_indices(n, k=1)
-    
-        # sign_mask = (-1.0) ** (r + c)
-    
-        # skew = np.zeros((n, n), dtype=vector.dtype)        
-        # skew[r, c] = vector[::-1] * sign_mask
-        # return skew - skew.T
         
     def to_vee(self, hat_vec):
         return to_vee(hat_vec)
-        # is_square(hat_vec)
-        # r_ = hat_vec.shape[0]
-        
-        # #this part does the reverse of to_hat
-        # r, c = np.triu_indices(r_, k=1)
-        # vector = hat_vec[r, c]
-        # sign_mask = (-1.0) ** (c + r)
-        # vector = (sign_mask * vector)[::-1]
-        
-        # return vector
 
 class se3():
     def __init__(self, twist):
@@ -206,8 +165,6 @@ class se3():
         self.hat = np.zeros((4, 4))
         self.hat[:3, :3] = self.phi.hat
         self.hat[:3, 3] = self.rho
-        # self.hat = np.block([[self.phi.hat, self.rho.reshape(3, 1)],
-        #                      [np.zeros((1, 3)),   np.zeros((1, 1))]])
         
     def exp_map(self):
         R = self.phi.exp_map() #returns SO_n()
@@ -247,18 +204,11 @@ class se3():
         Jl = np.zeros((6, 6));     Jl[:3, :3] = J;         Jl[:3, 3:] = Q;                      Jl[3:, 3:] = J
         Jl_inv = np.zeros((6, 6)); Jl_inv[:3, :3] = J_inv; Jl_inv[:3, 3:] = -J_inv @ Q @ J_inv; Jl_inv[3:, 3:] = J_inv
 
-        # Jl = np.block([[J,                Q],
-        #                [np.zeros((3, 3)), J]])
-        
-        # Jl_inv = np.block([[J_inv, -J_inv @ Q @ J_inv],
-        #                    [np.zeros((3, 3)),   J_inv]])
-
         return Jl, Jl_inv
 
         
 class SE3():
     def __init__(self, rotation, translation):
-        # print(rotation)
         if isinstance(rotation, SO_n):
             self.rotation = rotation
         else:
@@ -268,8 +218,6 @@ class SE3():
         self.R = self.rotation.R
         self.t = self.t_flat.reshape(3, 1) #column vector form (flat vector transposed
         
-        # self.X = np.block([[self.R,                self.t              ],
-        #                    [np.zeros((1, 3)),           np.ones((1, 1))]])
         self.X = np.eye(4)
         self.X[:3, :3] = self.R
         self.X[:3, 3] = self.t_flat
@@ -298,9 +246,6 @@ class SE3():
         return twist.vee
 
     def boxplus(self, delta):
-        # delta = se3(delta)
-        # X = self.X @ delta.exp_map().X
-        # return SE3(SO_n(X[:3, :3]), X[:3, 3])
         return self @ se3(delta).exp_map()
 
     def boxminus(self, other):
@@ -314,9 +259,6 @@ class SE3():
         Xi[:3, 3] = -Rt @ self.t_flat
         return Xi
 
-        # return np.block([[self.rotation.inverse(), -self.rotation.inverse() @ self.t],
-        #                  [np.zeros((1, 3)),                          np.ones((1, 1))]])
-
     def inverse_pose(self):
         Rt = self.rotation.inverse()
         return SE3(SO_n(Rt, validate=False), -Rt @ self.t_flat)
@@ -327,8 +269,6 @@ class SE3():
         A[:3, 3:] = to_hat(self.t_flat) @ self.R
         A[3:, 3:] = self.R
         return A
-        # return np.block([[self.R,                to_hat(self.t_flat) @ self.R],
-        #                  [np.zeros((3, 3)),                            self.R]])
 
     def Ad_inv(self):
         Rt = self.R.T
@@ -337,9 +277,7 @@ class SE3():
         A[:3, 3:] = -Rt @ to_hat(self.t_flat)
         A[3:, 3:] = Rt
         return A
-        # return np.block([[self.rotation.inverse(), -self.rotation.inverse() @ to_hat(self.t_flat)],
-        #                  [np.zeros((3, 3)),                               self.rotation.inverse()]])
-
+    
     def quat_to_rot(self, q):
         n = np.linalg.norm(q)
         if n < 1e-12:
@@ -351,7 +289,3 @@ class SE3():
                       [2*(x*y + z*w),     1 - 2*(x*x + z*z), 2*(y*z - x*w)],
                       [2*(x*z - y*w),     2*(y*z + x*w),     1 - 2*(x*x + y*y)]])
         return SO_n(R, validate=False)
-
-    # def inverse(self):
-    #     return 
-        
