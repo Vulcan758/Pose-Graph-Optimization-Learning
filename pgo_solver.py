@@ -1,4 +1,4 @@
-from Lee import SE3, se3
+from Lee import SE3, se3, SO_n
 import numpy as np
 # from scipy.linalg import cho_factor, cho_solve
 import scipy.sparse as sp
@@ -65,6 +65,87 @@ class Solver():
                 raise ValueError(f"duplicate vertex id {id}")
             pose_list[id] = X
 
+    def total_cost(self, poses):
+        cost = 0.0
+        for edge in self.edge_list:
+            X_i, X_j = poses[edge["i"]], poses[edge["j"]]
+            e = (edge["relative_measurement"].inverse_pose() @ X_i.inverse_pose() @ X_j).Log()
+            cost += e @ edge["omega"] @ e
+        return cost
+
+    def align_to_gt(self, poses):
+        T_align = self.pose_gt_list[0] @ poses[0].inverse_pose()
+        return [T_align @ p for p in poses]
+
+    def evaluate(self, poses):
+        m = {"cost": self.total_cost(poses)}
+        if not self.pose_gt_list:
+            return m
+        gt = self.pose_gt_list
+        est = self.align_to_gt(poses)
+
+        t_err = np.array([np.linalg.norm(e.t_flat - g.t_flat) for e, g in zip(est, gt)])
+        r_err = np.degrees([SO_n(g.R.T @ e.R, validate=False).log_map().theta for e, g in zip(est, gt)])
+
+        rpe_t, rpe_r = [], []
+        for k in range(len(gt) - 1):
+            d_est = est[k].inverse_pose() @ est[k + 1]
+            d_gt = gt[k].inverse_pose() @ gt[k + 1]
+            rpe_t.append(np.linalg.norm(d_est.t_flat - d_gt.t_flat))
+            rpe_r.append(np.degrees(SO_n(d_gt.R.T @ d_est.R, validate=False).log_map().theta))
+
+        rms = lambda x: float(np.sqrt(np.mean(np.square(x))))
+        m.update(ate_rmse=rms(t_err), ate_max=float(t_err.max()),
+                 rot_rmse_deg=rms(r_err), rot_max_deg=float(np.max(r_err)),
+                 rpe_trans=rms(rpe_t), rpe_rot_deg=rms(rpe_r),
+                 trans_errors=t_err)
+        return m
+
+    def report(self, result):
+        """Print a comparison table: initial guess vs result (vs ground truth)."""
+        rows = [("initial guess", self.evaluate(self.pose_list)), ("result", self.evaluate(result))]
+        if self.pose_gt_list:
+            rows.append(("ground truth", {"cost": self.total_cost(self.pose_gt_list)}))
+        cols = [("cost", "cost", "{:.4e}"), ("ate_rmse", "ATE rmse [m]", "{:.4f}"), ("ate_max", "ATE max [m]", "{:.4f}"),
+                ("rot_rmse_deg", "rot rmse [deg]", "{:.3f}"), ("rpe_trans", "RPE [m]", "{:.4f}"), ("rpe_rot_deg", "RPE rot [deg]", "{:.3f}")]
+        print(f"{'':15s}" + "".join(f"{h:>16s}" for _, h, _ in cols))
+        for name, m in rows:
+            print(f"{name:15s}" + "".join(f"{(fmt.format(m[k]) if k in m else '-'):>16s}" for k, _, fmt in cols))
+        if not self.pose_gt_list:
+            print("(no ground truth file given: only the cost can be compared)")
+
+    def plot(self, result):
+        """Trajectories, per-pose error, and cost per iteration."""
+        import matplotlib.pyplot as plt
+        has_gt = bool(self.pose_gt_list)
+        xyz = lambda P: np.array([p.t_flat for p in P])
+        init = self.align_to_gt(self.pose_list) if has_gt else self.pose_list
+        res = self.align_to_gt(result) if has_gt else result
+
+        fig = plt.figure(figsize=(16, 4.5))
+        ax = fig.add_subplot(1, 3, 1, projection="3d")
+        if has_gt:
+            p = xyz(self.pose_gt_list); ax.plot(p[:, 0], p[:, 1], p[:, 2], "k-", label="ground truth")
+        p = xyz(init); ax.plot(p[:, 0], p[:, 1], p[:, 2], "r--", label="initial")
+        p = xyz(res);  ax.plot(p[:, 0], p[:, 1], p[:, 2], "b-", label="result")
+        ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("z"); ax.legend(); ax.set_title("trajectory")
+
+        ax2 = fig.add_subplot(1, 3, 2)
+        if has_gt:
+            ax2.plot(self.evaluate(self.pose_list)["trans_errors"], "r--", label="initial")
+            ax2.plot(self.evaluate(result)["trans_errors"], "b-", label="result")
+            ax2.set_xlabel("pose id"); ax2.set_ylabel("translation error [m]"); ax2.legend()
+        else:
+            ax2.text(0.5, 0.5, "no ground truth", ha="center", va="center"); ax2.set_axis_off()
+        ax2.set_title("per-pose error")
+
+        ax3 = fig.add_subplot(1, 3, 3)
+        hist = getattr(self, "history", [])
+        if hist:
+            ax3.semilogy([h["iter"] for h in hist], [h["cost"] for h in hist], "o-")
+            ax3.set_xlabel("iteration"); ax3.set_ylabel("cost (log)")
+        ax3.set_title("convergence")
+        plt.tight_layout(); plt.show()
 
 class GNSolver(Solver): #Gauss-Newton Solver which will inherit from Solver base class
     def solve(self):
@@ -74,6 +155,7 @@ class GNSolver(Solver): #Gauss-Newton Solver which will inherit from Solver base
         new_final_pose_list = self.pose_list.copy()
 
         prev_cost = None
+        self.history = []
         factor = None
 
         for loop in range(loop_num):
@@ -115,6 +197,8 @@ class GNSolver(Solver): #Gauss-Newton Solver which will inherit from Solver base
                 b[j * d: j * d + d] += B_ij.T @ omega @ e_ij_vector
 
                 cost += e_ij_vector @ omega @ e_ij_vector
+
+            self.history.append({"iter": loop, "cost": cost})
 
             #this is a stop case
             if prev_cost is not None:
