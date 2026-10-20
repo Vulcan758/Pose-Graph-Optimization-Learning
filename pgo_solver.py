@@ -1,6 +1,8 @@
 from Lee import SE3, se3
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve
+import scipy.sparse as sp
+from scipy.sparse.linalg import spsolve
 
 #todo
 #make general for se2 as well (needs general base se2 class or separate se2 class)
@@ -74,7 +76,8 @@ class GNSolver(Solver): #Gauss-Newton Solver which will inherit from Solver base
 
         for loop in range(loop_num):
             #main loop
-            H = np.zeros((d * N, d * N))
+            # H = np.zeros((d * N, d * N))
+            rows, cols, vals = [], [], []
             b = np.zeros(d * N)
             cost = 0.0
             
@@ -94,11 +97,16 @@ class GNSolver(Solver): #Gauss-Newton Solver which will inherit from Solver base
                 A_ij = -Jr_inv @ T.inverse_pose().Ad()
                 B_ij = Jr_inv
             
-                H[i * d : i * d + d, i * d : i * d + d] += A_ij.T @ omega @ A_ij
-                H[i * d : i * d + d, j * d : j * d + d] += A_ij.T @ omega @ B_ij
-                H[j * d : j * d + d, i * d : i * d + d] += B_ij.T @ omega @ A_ij
-                H[j * d : j * d + d, j * d : j * d + d] += B_ij.T @ omega @ B_ij 
+                # H[i * d : i * d + d, i * d : i * d + d] += A_ij.T @ omega @ A_ij
+                # H[i * d : i * d + d, j * d : j * d + d] += A_ij.T @ omega @ B_ij
+                # H[j * d : j * d + d, i * d : i * d + d] += B_ij.T @ omega @ A_ij
+                # H[j * d : j * d + d, j * d : j * d + d] += B_ij.T @ omega @ B_ij 
                 
+                # this makes it sparse fr
+                self.add_block(rows, cols, vals, i, i, A_ij.T @ omega @ A_ij, d)
+                self.add_block(rows, cols, vals, i, j, A_ij.T @ omega @ B_ij, d)
+                self.add_block(rows, cols, vals, j, i, B_ij.T @ omega @ A_ij, d)
+                self.add_block(rows, cols, vals, j, j, B_ij.T @ omega @ B_ij, d)
                 
                 b[i * d: i * d + d] += A_ij.T @ omega @ e_ij_vector
                 b[j * d: j * d + d] += B_ij.T @ omega @ e_ij_vector
@@ -116,9 +124,13 @@ class GNSolver(Solver): #Gauss-Newton Solver which will inherit from Solver base
                     break
             prev_cost = cost
             
-            c, low = cho_factor(H[d:, d:]) #anchor for gauge freedom
+            # c, low = cho_factor(H[d:, d:]) #anchor for gauge freedom
+
+            H = sp.coo_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(d * N, d * N)).tocsc()
             delx = np.zeros(d * N)
-            delx[d:] = cho_solve((c, low), -b[d:])
+            # delx[d:] = cho_solve((c, low), -b[d:])
+            delx[d:] = spsolve(H[d:, d:], -b[d:]) #anchor for gauge freedom
+
 
             for n in range(N):
                 delta_x = delx[n * d : n * d + d]
@@ -126,4 +138,7 @@ class GNSolver(Solver): #Gauss-Newton Solver which will inherit from Solver base
 
         return new_final_pose_list
         
+    def add_block(self, rows, cols, vals, r, c, block, d):
+        rr, cc = np.meshgrid(np.arange(r * d, r * d + d), np.arange(c * d, c * d + d), indexing="ij")
+        rows.append(rr.ravel()); cols.append(cc.ravel()); vals.append(block.ravel())
             
