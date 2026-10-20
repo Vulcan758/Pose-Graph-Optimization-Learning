@@ -11,13 +11,13 @@ Thus began my fascination with the subject and as I went deeper I found out abou
 Personally for me, if I want to understand really rigorously, I have to write it down as elaborately as possible with a pen and paper and that is precisely what I did for understanding this from head to toe. These can be seen in [handwritten_notes/pose_graph_optimization_notes.pdf](handwritten_notes/pose_graph_optimization_notes.pdf) where I had essentially derived the entire problem formulation first from simple probability maximization of
 
 $$
-\mathbf{x}^* = \underset{\mathbf{x}}{\arg\max}\; p(\mathbf{x} \mid \mathbf{z}, \mathbf{u})
+\mathbf{x}^* = \arg\max_{\mathbf{x}}\; p(\mathbf{x} \mid \mathbf{z}, \mathbf{u})
 $$
 
 to the creation of the objective function
 
 $$
-F(\mathbf{x}) = \sum_{\langle i,j \rangle} \mathbf{e}_{ij}^\top \, \boldsymbol{\Omega}_{ij} \, \mathbf{e}_{ij}
+F(\mathbf{x}) = \sum_{\langle i,j \rangle} \mathbf{e}_{ij}^\top \, \mathbf{\Omega}_{ij} \, \mathbf{e}_{ij}
 $$
 
 Afterwards to actually solve for that, we'd Taylor expand the error function with respect to some delta:
@@ -31,9 +31,9 @@ Then, applying that expansion to the objective, we obtain a quadratic of $\Delta
 $$
 F(\mathbf{x} + \Delta\mathbf{x}) \approx c + 2\,\mathbf{b}^\top \Delta\mathbf{x} + \Delta\mathbf{x}^\top \mathbf{H} \, \Delta\mathbf{x},
 \qquad
-\mathbf{H} = \sum_{\langle i,j \rangle} \mathbf{J}_{ij}^\top \boldsymbol{\Omega}_{ij} \mathbf{J}_{ij},
+\mathbf{H} = \sum_{\langle i,j \rangle} \mathbf{J}_{ij}^\top \mathbf{\Omega}_{ij} \mathbf{J}_{ij},
 \qquad
-\mathbf{b} = \sum_{\langle i,j \rangle} \mathbf{J}_{ij}^\top \boldsymbol{\Omega}_{ij} \mathbf{e}_{ij}
+\mathbf{b} = \sum_{\langle i,j \rangle} \mathbf{J}_{ij}^\top \mathbf{\Omega}_{ij} \mathbf{e}_{ij}
 $$
 
 We do this by taking the derivative of the objective with respect to $\Delta\mathbf{x}$ and setting it to zero, which gives
@@ -51,7 +51,7 @@ $$
 and in the manifold case we use the boxplus operator on each pose:
 
 $$
-\mathbf{X}_k \leftarrow \mathbf{X}_k \boxplus \Delta\mathbf{x}_k^* = \mathbf{X}_k \operatorname{Exp}(\Delta\mathbf{x}_k^*)
+\mathbf{X}_k \leftarrow \mathbf{X}_k \boxplus \Delta\mathbf{x}_k^* = \mathbf{X}_k \mathrm{Exp}(\Delta\mathbf{x}_k^*)
 $$
 
 This derivation was done for both the vector case and the manifold case. 
@@ -70,14 +70,14 @@ Now finally having constructed a Gauss Newton Solver, it was time to run tests a
 
 I compared my own backend results with a GTSAM version with the same solver to see how my own implementation performed with respect to it. GTSAM had a maximum loop count of 20 iterations (40 for M3500a, see below) and my solver had a maximum of 40; apart from M3500a, every run converged within 6 steps, so these limits never came into play. For the $SE(3)$ datasets, the rotation scaling factor in my g2o parser (which follows g2o's quaternion error convention) was disabled so that both solvers minimise exactly the same cost; with it enabled, my solver reports a differently scaled cost for $SE(3)$ (e.g. 727.3 instead of 1351.4 on sphere2500). Solve times exclude loading the file, for both implementations; my parse time is shown separately in brackets.
 
-| Dataset | Type | Steps (this / GTSAM) | Final cost, this solver | Final cost, GTSAM | Max pose difference | Solve time, this solver (+ parse) | Solve time, GTSAM | GTSAM faster by |
-|---|---|---|---|---|---|---|---|---|
-| intel | SE(2) | 3 / 3 | 4.500423e+01 | 4.500423e+01 | 3.6e-06 m, 2.2e-05° | 14.5 s (+0.7 s) | 0.11 s | ~130× |
-| M3500 | SE(2) | 5 / 5 | 1.379149e+02 | 1.379149e+02 | 1.0e-05 m, 3.6e-04° | 44.0 s (+1.1 s) | 0.37 s | ~120× |
-| M3500a | SE(2) | 25 / 25 | 7.756562e+03 | 7.756562e+03 | 1.3e-06 m, 7.1e-05° | 209.9 s (+1.4 s) | 1.69 s | ~125× |
-| city10000 | SE(2) | 6 / 6 | 5.119875e+02 | 5.119875e+02 | 3.1e-06 m, 1.8e-04° | 195.5 s (+4.5 s) | 1.76 s | ~110× |
-| sphere2500 | SE(3) | 6 / 6 | 1.351402e+03 | 1.351402e+03 | 1.0e-12 m, 6.7e-13° | 45.5 s (+1.8 s) | 1.24 s | ~37× |
-| parking-garage | SE(3) | 4 / 4 | 1.268385e+00 | 1.268385e+00 | 4.0e-11 m, 1.1e-11° | 39.0 s (+2.1 s) | 0.33 s | ~120× |
+| Dataset | Type | Steps (this / GTSAM) | Final cost, this solver | Final cost, GTSAM | Max pose difference | Solve time, this solver (+ parse) | Solve time, GTSAM |
+|---|---|---|---|---|---|---|---|
+| intel | SE(2) | 3 / 3 | 4.500423e+01 | 4.500423e+01 | 3.6e-06 m, 2.2e-05° | 14.5 s (+0.7 s) | 0.11 s |
+| M3500 | SE(2) | 5 / 5 | 1.379149e+02 | 1.379149e+02 | 1.0e-05 m, 3.6e-04° | 44.0 s (+1.1 s) | 0.37 s |
+| M3500a | SE(2) | 25 / 25 | 7.756562e+03 | 7.756562e+03 | 1.3e-06 m, 7.1e-05° | 209.9 s (+1.4 s) | 1.69 s |
+| city10000 | SE(2) | 6 / 6 | 5.119875e+02 | 5.119875e+02 | 3.1e-06 m, 1.8e-04° | 195.5 s (+4.5 s) | 1.76 s |
+| sphere2500 | SE(3) | 6 / 6 | 1.351402e+03 | 1.351402e+03 | 1.0e-12 m, 6.7e-13° | 45.5 s (+1.8 s) | 1.24 s |
+| parking-garage | SE(3) | 4 / 4 | 1.268385e+00 | 1.268385e+00 | 4.0e-11 m, 1.1e-11° | 39.0 s (+2.1 s) | 0.33 s |
 
 From the table, we can see that both implementations solve very similarly going to similar costs and steps. The only eye-catching difference is the time taken for both implementations. GTSAM would take much less time than my own implementation did. This is due to a variety of factors, one of the biggest being the languages written. My implementation being written in python will understandably cause issues with speed. Another big issue is that calculations are done in loops, rather possibly doing them all as a single stacked batch matrix would possibly reduce the speed issues by a great deal.
 
