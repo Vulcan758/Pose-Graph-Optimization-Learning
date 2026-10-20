@@ -1,0 +1,12 @@
+# reference material
+lie_library_guide.md
+lie_library_guide.md.pdf
+lie_theory_notes.md
+lie_theory_notes.md.pdf
+SE3_PGO_Roadmap.pdf
+PGO_TODO.md
+TBOS.ipynb
+
+# test scripts
+test_lee.py
+test_pgo_ready.py
