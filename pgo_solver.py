@@ -96,7 +96,8 @@ class GNSolver(Solver): #Gauss-Newton Solver which will inherit from Solver base
             
                 Jr, Jr_inv = e_ij.compute_left_jacobians(right=True)
             
-                A_ij = -Jr_inv @ T.inverse_pose().Ad()
+                # A_ij = -Jr_inv @ T.inverse_pose().Ad()
+                A_ij = -Jr_inv @ T.Ad_inv()
                 B_ij = Jr_inv
             
                 # H[i * d : i * d + d, i * d : i * d + d] += A_ij.T @ omega @ A_ij

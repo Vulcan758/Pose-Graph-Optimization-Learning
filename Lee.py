@@ -4,6 +4,9 @@ import numpy as np
 
 def to_hat(vector): #converts w to w^
     # n = self.n 
+    if vector.shape[0] == 3: #direct for low dim stuff
+        x, y, z = vector
+        return np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]])
     m = vector.shape[0]
     n = int((1 + np.sqrt(1 + 8 * m)) / 2) # invert m = n(n-1)/2 --> this is the n value in n by n of matrix
         
@@ -19,6 +22,9 @@ def to_hat(vector): #converts w to w^
     return skew - skew.T
     
 def to_vee(hat_vec):
+    if hat_vec.shape == (3, 3): #direct 
+        return np.array([hat_vec[2, 1], hat_vec[0, 2], hat_vec[1, 0]])
+    
     is_square(hat_vec)
     r_ = hat_vec.shape[0]
     
@@ -46,7 +52,7 @@ def is_valid_hat(hat_vec):
     return np.allclose(hat_vec + hat_vec.T, np.zeros((n, n))) #skew symmetric ma|trices summed with its transpose is supposed to equal 0
 
 class SO_n():
-    def __init__(self, R: np.ndarray, verbose = False):
+    def __init__(self, R: np.ndarray, verbose = False, validate=True):
         # r, c = R.shape
         # if r != c:
         #     raise ValueError(f"Matrix is not n by n: {r} x {c}") #continue
@@ -57,7 +63,7 @@ class SO_n():
         if r > 3 and self.verbose:
             print("Exp and log map will not work for this dimenison")
         
-        if not np.allclose(R @ R.T, np.eye(r)) or not np.isclose(np.linalg.det(R), 1.0):
+        if validate and (not np.allclose(R @ R.T, np.eye(r)) or not np.isclose(np.linalg.det(R), 1.0)):
             raise ValueError("Invalid rotation matrix")
         if self.verbose:
             print(f"Rotation matrix is valid and is in SO({r})")
@@ -99,8 +105,8 @@ class so_n():
         if phi.ndim != 1:
             raise ValueError("Invalid vector shape")
         self.hat = self.to_hat(phi)
-        if not self.is_valid_hat(self.hat):
-            raise ValueError("Invalid contents in vector")
+        # if not self.is_valid_hat(self.hat): # this line doesnt do much
+        #     raise ValueError("Invalid contents in vector")
         self.vee = phi #this is the vector
         if self.verbose:
             print(self.hat) #this is the skew
@@ -138,8 +144,8 @@ class so_n():
         return Jl, Jl_inv
 
     def exp_map(self):
-        if not is_valid_hat(self.hat): #this does the is_square
-            raise ValueError("Invalid skew symmetric matrix input")
+        # if not is_valid_hat(self.hat): #this does the is_square # not needed
+        #     raise ValueError("Invalid skew symmetric matrix input")
         
         n = self.hat.shape[0]
         if self.theta < self.threshold:
@@ -158,35 +164,37 @@ class so_n():
         #         from scipy.sparse.linalg import expm
         #         R = expm(hat_vec)
      
-        return SO_n(R)
+        return SO_n(R, validate=False)
 
     def to_hat(self, vector): #converts w to w^
+        return to_hat(vector)
         # n = self.n 
-        m = vector.shape[0]
-        n = int((1 + np.sqrt(1 + 8 * m)) / 2) # invert m = n(n-1)/2 --> this is the n value in n by n of matrix
+        # m = vector.shape[0]
+        # n = int((1 + np.sqrt(1 + 8 * m)) / 2) # invert m = n(n-1)/2 --> this is the n value in n by n of matrix
             
-        if n * (n - 1) // 2 != m: # this expression outputs the vector shape required, (e.g. 3x3 --> 3, 4x4 --> 6, 5x5 --> 10, ..)
-            raise ValueError(f"length {m} is not n(n-1)/2 for any integer n")
+        # if n * (n - 1) // 2 != m: # this expression outputs the vector shape required, (e.g. 3x3 --> 3, 4x4 --> 6, 5x5 --> 10, ..)
+        #     raise ValueError(f"length {m} is not n(n-1)/2 for any integer n")
     
-        r, c = np.triu_indices(n, k=1)
+        # r, c = np.triu_indices(n, k=1)
     
-        sign_mask = (-1.0) ** (r + c)
+        # sign_mask = (-1.0) ** (r + c)
     
-        skew = np.zeros((n, n), dtype=vector.dtype)        
-        skew[r, c] = vector[::-1] * sign_mask
-        return skew - skew.T
+        # skew = np.zeros((n, n), dtype=vector.dtype)        
+        # skew[r, c] = vector[::-1] * sign_mask
+        # return skew - skew.T
         
     def to_vee(self, hat_vec):
-        is_square(hat_vec)
-        r_ = hat_vec.shape[0]
+        return to_vee(hat_vec)
+        # is_square(hat_vec)
+        # r_ = hat_vec.shape[0]
         
-        #this part does the reverse of to_hat
-        r, c = np.triu_indices(r_, k=1)
-        vector = hat_vec[r, c]
-        sign_mask = (-1.0) ** (c + r)
-        vector = (sign_mask * vector)[::-1]
+        # #this part does the reverse of to_hat
+        # r, c = np.triu_indices(r_, k=1)
+        # vector = hat_vec[r, c]
+        # sign_mask = (-1.0) ** (c + r)
+        # vector = (sign_mask * vector)[::-1]
         
-        return vector
+        # return vector
 
 class se3():
     def __init__(self, twist):
@@ -195,8 +203,12 @@ class se3():
         self.rho = twist[:3] #translational velocities
         self.threshold = 0.001
         
-        self.hat = np.block([[self.phi.hat, self.rho.reshape(3, 1)],
-                             [np.zeros((1, 3)),   np.zeros((1, 1))]])
+        self.hat = np.zeros((4, 4))
+        self.hat[:3, :3] = self.phi.hat
+        self.hat[:3, 3] = self.rho
+        # self.hat = np.block([[self.phi.hat, self.rho.reshape(3, 1)],
+        #                      [np.zeros((1, 3)),   np.zeros((1, 1))]])
+        
     def exp_map(self):
         R = self.phi.exp_map() #returns SO_n()
         Jl_phi, Jl_inv_phi = self.phi.compute_left_jacobians()
@@ -204,7 +216,7 @@ class se3():
         return SE3(R, t)
 
     def ad(self):
-        return np.block([[self.phi.hat, to_hat(self.rho)],
+        return np.block([[self.phi.hat, to_hat(self.rho)], #solver doesnt use this so i wont be changing it
                          [np.zeros((3, 3)), self.phi.hat]])
         
     def compute_left_jacobians(self, right=False):
@@ -212,7 +224,7 @@ class se3():
         twist = self.vee
         if right:
             twist = -self.vee
-        phi = so_n(twist[3:])
+        phi = so_n(twist[3:]) if right else self.phi
         rho = twist[:3]
         P = to_hat(rho)
         S = phi.hat
@@ -232,11 +244,14 @@ class se3():
     
         J, J_inv = phi.compute_left_jacobians()
 
-        Jl = np.block([[J,                Q],
-                       [np.zeros((3, 3)), J]])
+        Jl = np.zeros((6, 6));     Jl[:3, :3] = J;         Jl[:3, 3:] = Q;                      Jl[3:, 3:] = J
+        Jl_inv = np.zeros((6, 6)); Jl_inv[:3, :3] = J_inv; Jl_inv[:3, 3:] = -J_inv @ Q @ J_inv; Jl_inv[3:, 3:] = J_inv
+
+        # Jl = np.block([[J,                Q],
+        #                [np.zeros((3, 3)), J]])
         
-        Jl_inv = np.block([[J_inv, -J_inv @ Q @ J_inv],
-                           [np.zeros((3, 3)),   J_inv]])
+        # Jl_inv = np.block([[J_inv, -J_inv @ Q @ J_inv],
+        #                    [np.zeros((3, 3)),   J_inv]])
 
         return Jl, Jl_inv
 
@@ -253,14 +268,17 @@ class SE3():
         self.R = self.rotation.R
         self.t = self.t_flat.reshape(3, 1) #column vector form (flat vector transposed
         
-        self.X = np.block([[self.R,                self.t              ],
-                           [np.zeros((1, 3)),           np.ones((1, 1))]])
-        
+        # self.X = np.block([[self.R,                self.t              ],
+        #                    [np.zeros((1, 3)),           np.ones((1, 1))]])
+        self.X = np.eye(4)
+        self.X[:3, :3] = self.R
+        self.X[:3, 3] = self.t_flat
+
     def __matmul__(self, other):
         if isinstance(other, SE3): #for pose on pose
             R = self.R @ other.R
             t = self.R @ other.t_flat + self.t_flat
-            return SE3(SO_n(R), t)
+            return SE3(SO_n(R, validate=False), t)
         if isinstance(other, np.ndarray): #for pose on point
             if other.shape == (3,): 
                 return self.R @ other + self.t_flat
@@ -287,29 +305,52 @@ class SE3():
 
     def boxminus(self, other):
         D = other.inverse() @ self.X
-        return SE3(SO_n(D[:3, :3]), D[:3, 3]).Log()
+        return SE3(SO_n(D[:3, :3], validate=False), D[:3, 3]).Log()
 
     def inverse(self):
-        return np.block([[self.rotation.inverse(), -self.rotation.inverse() @ self.t],
-                         [np.zeros((1, 3)),                          np.ones((1, 1))]])
+        Rt = self.R.T
+        Xi = np.eye(4)
+        Xi[:3, :3] = Rt
+        Xi[:3, 3] = -Rt @ self.t_flat
+        return Xi
+
+        # return np.block([[self.rotation.inverse(), -self.rotation.inverse() @ self.t],
+        #                  [np.zeros((1, 3)),                          np.ones((1, 1))]])
+
     def inverse_pose(self):
         Rt = self.rotation.inverse()
-        return SE3(SO_n(Rt), -Rt @ self.t_flat)
+        return SE3(SO_n(Rt, validate=False), -Rt @ self.t_flat)
         
     def Ad(self):
-        return np.block([[self.R,                to_hat(self.t_flat) @ self.R],
-                         [np.zeros((3, 3)),                            self.R]])
+        A = np.zeros((6, 6))
+        A[:3, :3] = self.R
+        A[:3, 3:] = to_hat(self.t_flat) @ self.R
+        A[3:, 3:] = self.R
+        return A
+        # return np.block([[self.R,                to_hat(self.t_flat) @ self.R],
+        #                  [np.zeros((3, 3)),                            self.R]])
+
     def Ad_inv(self):
-        return np.block([[self.rotation.inverse(), -self.rotation.inverse() @ to_hat(self.t_flat)],
-                         [np.zeros((3, 3)),                               self.rotation.inverse()]])
+        Rt = self.R.T
+        A = np.zeros((6, 6))
+        A[:3, :3] = Rt
+        A[:3, 3:] = -Rt @ to_hat(self.t_flat)
+        A[3:, 3:] = Rt
+        return A
+        # return np.block([[self.rotation.inverse(), -self.rotation.inverse() @ to_hat(self.t_flat)],
+        #                  [np.zeros((3, 3)),                               self.rotation.inverse()]])
+
     def quat_to_rot(self, q):
+        n = np.linalg.norm(q)
+        if n < 1e-12:
+            raise ValueError("zero quaternion")
         q = np.asarray(q, dtype=float)
-        q = q / np.linalg.norm(q)
+        q = q / n
         x, y, z, w = q
         R = np.array([[1 - 2*(y*y + z*z), 2*(x*y - z*w),     2*(x*z + y*w)],
                       [2*(x*y + z*w),     1 - 2*(x*x + z*z), 2*(y*z - x*w)],
                       [2*(x*z - y*w),     2*(y*z + x*w),     1 - 2*(x*x + y*y)]])
-        return SO_n(R)
+        return SO_n(R, validate=False)
 
     # def inverse(self):
     #     return 
