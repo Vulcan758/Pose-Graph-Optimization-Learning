@@ -1,13 +1,11 @@
-from Lee import SE3, se3, SO_n
+from Lee import SE3, se3, SE2, se2, SO_n
 import numpy as np
-# from scipy.linalg import cho_factor, cho_solve
 import scipy.sparse as sp
-# from scipy.sparse.linalg import spsolve
 from sksparse.cholmod import cholesky
 
 #todo
 #make general for se2 as well (needs general base se2 class or separate se2 class)
-# in the Solver init make a check for SE2 SE3 in both gt and real dataset
+# in the Solver init make a check for SE2 SE3 in both gt and real dataset (done)
 #make sparse H and solvable with spsolve or cholmod (done)
 #do some minor efficiency cleanups
 #add LM version of solver
@@ -21,19 +19,43 @@ class Solver():
         self.edge_gt_list = []
         self.pose_gt_list = []
 
+        self.d = None
+
         with open(g2o_dataset_filepath, "r") as f:
             for line in f:
                 self.g2o_data_parser(line, self.pose_list, self.edge_list)
+        if self.d is None:
+            raise ValueError(f"no SE2 or SE3 vertex/edge lines found in {g2o_dataset_filepath}")
+        if not self.pose_list:
+            raise ValueError(f"no VERTEX lines in {g2o_dataset_filepath}, so there is no initial guess")
         if g2o_gt_filepath:
             with open(g2o_gt_filepath, "r") as f:
                 for line in f:
                     self.g2o_data_parser(line, self.pose_gt_list, self.edge_gt_list)
-        
+
+    def set_dims(self, d):
+        if self.d is None:
+            self.d = d
+        elif self.d != d:
+            raise ValueError(f"mixed SE2 and SE3 lines: expected dimension {self.d}, got {d}")
+
+    def insert_pose(self, pose_list, id, X):
+        if id >= len(pose_list):
+            pose_list.extend([None] * (id + 1 - len(pose_list)))
+        if pose_list[id] is not None:
+            raise ValueError(f"duplicate vertex id {id}")
+        pose_list[id] = X
+
     def g2o_data_parser(self, line, pose_list, edge_list):
         tok = line.split()
-        if line.startswith("EDGE_SE3:QUAT"):    
+        if not tok:
+            return
+        tag = tok[0]
+
+        if tag == "EDGE_SE3:QUAT":
             if len(tok) != 31:
                 raise ValueError(f"EDGE_SE3:QUAT needs 31 tokens, got {len(tok)}: {line.strip()[:60]}")
+            self.set_dims(6)
             i, j = int(tok[1]), int(tok[2])
             vals = np.array(tok[3:], dtype=float)
 
@@ -50,20 +72,38 @@ class Solver():
 
             edge_list.append(dict(i=i, j=j, relative_measurement=Z, omega=omega))
 
-        if line.startswith("VERTEX_SE3:QUAT"):
+        elif tag == "EDGE_SE2":
+            if len(tok) != 12:
+                raise ValueError(f"EDGE_SE2 needs 12 tokens, got {len(tok)}: {line.strip()[:60]}")
+            self.set_dims(3)
+            i, j = int(tok[1]), int(tok[2])
+            vals = np.array(tok[3:], dtype=float)
+
+            Z = SE2(vals[2], vals[0:2])
+
+            I = np.zeros((3, 3))
+            I[np.triu_indices(3)] = vals[3:]
+            omega = I + np.triu(I, 1).T
+
+            edge_list.append(dict(i=i, j=j, relative_measurement=Z, omega=omega))
+
+        elif tag == "VERTEX_SE3:QUAT":
             if len(tok) != 9:
                 raise ValueError(f"VERTEX_SE3:QUAT needs 9 tokens, got {len(tok)}: {line.strip()[:60]}")
+            self.set_dims(6)
             id = int(tok[1])
             vals = np.array(tok[2:], dtype=float)
             trans = vals[0:3]
             quat = vals[3:7] / np.linalg.norm(vals[3:7])
-            X = SE3(tuple(quat), trans)
+            self.insert_pose(pose_list, id, SE3(tuple(quat), trans))
 
-            if id >= len(pose_list):
-                pose_list.extend([None] * (id + 1 - len(pose_list))) #makes it longer by 1 + id 
-            if pose_list[id] is not None:
-                raise ValueError(f"duplicate vertex id {id}")
-            pose_list[id] = X
+        elif tag == "VERTEX_SE2":
+            if len(tok) != 5:
+                raise ValueError(f"VERTEX_SE2 needs 5 tokens, got {len(tok)}: {line.strip()[:60]}")
+            self.set_dims(3)
+            id = int(tok[1])
+            vals = np.array(tok[2:], dtype=float)
+            self.insert_pose(pose_list, id, SE2(vals[2], vals[0:2]))
 
     def total_cost(self, poses):
         cost = 0.0
@@ -123,12 +163,21 @@ class Solver():
         res = self.align_to_gt(result) if has_gt else result
 
         fig = plt.figure(figsize=(16, 4.5))
-        ax = fig.add_subplot(1, 3, 1, projection="3d")
+        trajectories = [(init, "r--", "initial"), (res, "b-", "result")]
         if has_gt:
-            p = xyz(self.pose_gt_list); ax.plot(p[:, 0], p[:, 1], p[:, 2], "k-", label="ground truth")
-        p = xyz(init); ax.plot(p[:, 0], p[:, 1], p[:, 2], "r--", label="initial")
-        p = xyz(res);  ax.plot(p[:, 0], p[:, 1], p[:, 2], "b-", label="result")
-        ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("z"); ax.legend(); ax.set_title("trajectory")
+            trajectories.insert(0, (self.pose_gt_list, "k-", "ground truth"))
+
+        if self.d == 6:
+            ax = fig.add_subplot(1, 3, 1, projection="3d")
+            for P, style, label in trajectories:
+                p = xyz(P); ax.plot(p[:, 0], p[:, 1], p[:, 2], style, label=label)
+            ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("z")
+        elif self.d == 3:
+            ax = fig.add_subplot(1, 3, 1)
+            for P, style, label in trajectories:
+                p = xyz(P); ax.plot(p[:, 0], p[:, 1], style, label=label)
+            ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_aspect("equal")
+        ax.legend(); ax.set_title("trajectory")
 
         ax2 = fig.add_subplot(1, 3, 2)
         if has_gt:
@@ -149,9 +198,9 @@ class Solver():
 
 class GNSolver(Solver): #Gauss-Newton Solver which will inherit from Solver base class
     def solve(self):
-        d = 6 # hardcoded dimension, should be set in init method
+        d = self.d
         N = len(self.pose_list)
-        loop_num = 20
+        loop_num = 40
         new_final_pose_list = self.pose_list.copy()
 
         prev_cost = None

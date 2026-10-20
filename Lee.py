@@ -64,6 +64,9 @@ class SO_n():
         return self.R.T
 
     def log_map(self):
+        if self.dims == 2:
+            return so_n(np.array([np.arctan2(self.R[1, 0], self.R[0, 0])]))
+
         theta = np.arccos(np.clip((np.trace(self.R) - 1) / 2, -1.0, 1.0))
         v = to_vee(self.R - self.inverse())
         
@@ -288,4 +291,135 @@ class SE3():
         R = np.array([[1 - 2*(y*y + z*z), 2*(x*y - z*w),     2*(x*z + y*w)],
                       [2*(x*y + z*w),     1 - 2*(x*x + z*z), 2*(y*z - x*w)],
                       [2*(x*z - y*w),     2*(y*z + x*w),     1 - 2*(x*x + y*y)]])
+        return SO_n(R, validate=False)
+
+
+class se2():
+    def __init__(self, twist):
+        self.vee = twist
+        self.phi = so_n(twist[2:])
+        self.rho = twist[:2]
+        self.threshold = 0.001
+
+        self.hat = np.zeros((3, 3))
+        self.hat[:2, :2] = self.phi.hat
+        self.hat[:2, 2] = self.rho
+
+    def exp_map(self):
+        R = self.phi.exp_map()
+        Jl_phi, Jl_inv_phi = self.phi.compute_left_jacobians()
+        t = Jl_phi @ self.rho
+        return SE2(R, t)
+
+    def ad(self):
+        A = np.zeros((3, 3))
+        A[:2, :2] = self.phi.hat
+        A[0, 2] = self.rho[1]
+        A[1, 2] = -self.rho[0]
+        return A
+
+    def compute_left_jacobians(self, right=False):
+        twist = self.vee
+        if right:
+            twist = -self.vee
+        x, y, theta = twist
+
+        if abs(theta) < self.threshold:
+            a = 1 - (theta ** 2) / 6
+            b = theta / 2 - (theta ** 3) / 24
+            q0 = y / 2 + x * theta / 6 - y * (theta ** 2) / 24
+            q1 = -x / 2 + y * theta / 6 + x * (theta ** 2) / 24
+            a_inv = 1 - (theta ** 2) / 12
+        else:
+            s, c = np.sin(theta), np.cos(theta)
+            a = s / theta
+            b = (1 - c) / theta
+            q0 = (theta * x + y * (1 - c) - x * s) / (theta ** 2)
+            q1 = (theta * y - y * s - x * (1 - c)) / (theta ** 2)
+            a_inv = theta * s / (2 * (1 - c))
+
+        V = np.array([[a, -b], [b, a]])
+        V_inv = np.array([[a_inv, theta / 2], [-theta / 2, a_inv]])
+        q = np.array([q0, q1])
+
+        Jl = np.eye(3)
+        Jl[:2, :2] = V
+        Jl[:2, 2] = q
+
+        Jl_inv = np.eye(3)
+        Jl_inv[:2, :2] = V_inv
+        Jl_inv[:2, 2] = -V_inv @ q
+
+        return Jl, Jl_inv
+
+
+class SE2():
+    def __init__(self, rotation, translation):
+        if isinstance(rotation, SO_n):
+            self.rotation = rotation
+        else:
+            self.rotation = self.angle_to_rot(rotation)
+
+        self.t_flat = np.asarray(translation, dtype=float)
+        self.R = self.rotation.R
+        self.t = self.t_flat.reshape(2, 1)
+        self.theta = np.arctan2(self.R[1, 0], self.R[0, 0])
+
+        self.X = np.eye(3)
+        self.X[:2, :2] = self.R
+        self.X[:2, 2] = self.t_flat
+
+    def __matmul__(self, other):
+        if isinstance(other, SE2):
+            R = self.R @ other.R
+            t = self.R @ other.t_flat + self.t_flat
+            return SE2(SO_n(R, validate=False), t)
+        if isinstance(other, np.ndarray):
+            if other.shape == (2,):
+                return self.R @ other + self.t_flat
+            if other.ndim == 2 and other.shape[0] == 2:
+                return self.R @ other + self.t
+        return NotImplemented
+
+    def log_map(self):
+        phi = self.rotation.log_map()
+        Jl_phi, Jl_inv_phi = phi.compute_left_jacobians()
+        rho = Jl_inv_phi @ self.t_flat
+        twist = np.concatenate([rho, phi.vee])
+        return se2(twist)
+
+    def Log(self):
+        twist = self.log_map()
+        return twist.vee
+
+    def boxplus(self, delta):
+        return self @ se2(delta).exp_map()
+
+    def boxminus(self, other):
+        return (other.inverse_pose() @ self).Log()
+
+    def inverse(self):
+        Rt = self.R.T
+        Xi = np.eye(3)
+        Xi[:2, :2] = Rt
+        Xi[:2, 2] = -Rt @ self.t_flat
+        return Xi
+
+    def inverse_pose(self):
+        Rt = self.R.T
+        return SE2(SO_n(Rt, validate=False), -Rt @ self.t_flat)
+
+    def Ad(self):
+        A = np.eye(3)
+        A[:2, :2] = self.R
+        A[0, 2] = self.t_flat[1]
+        A[1, 2] = -self.t_flat[0]
+        return A
+
+    def Ad_inv(self):
+        return self.inverse_pose().Ad()
+
+    def angle_to_rot(self, theta):
+        c, s = np.cos(theta), np.sin(theta)
+        R = np.array([[c, -s], [s, c]])
         return SO_n(R, validate=False)
